@@ -1,2 +1,5 @@
 nextflow.config
 data/
+work/
+results/
+.nextflow*
