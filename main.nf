@@ -9,6 +9,9 @@ workflow {
     //download_db()
     yeast_tax_id()
     blastp(protein_fasta, yeast_tax_id.out)
+    to_fasta(blastp.out)
+    align_seqs(to_fasta.out)
+    build_profile(align_seqs.out)
 
 }
 
@@ -52,12 +55,40 @@ process blastp {
         -db nr \
         -out "${protein_fasta.baseName}.blastp" \
         -evalue 10 \
-        -outfmt 3 \
+        -outfmt '6 qseqid sseqid sseq' \
         -remote
         """    
 }
+//qseqid = query sequence id
+//sseqid = subject sequence id
+//sseq = subject sequence (is this only the aligned part?)
+
+process to_fasta {
+    publishDir "${params.publish_dir}/blastp", mode: 'copy'
+    input:
+        path blastp_out
+    output:
+        path "${blastp_out.baseName}.faa"
+    script:
+        """
+        awk 'BEGIN { OFS = "\\n"} {print ">" \$1 \$2, \$3}' ${blastp_out} > "${blastp_out.baseName}.faa"
+        """
+}
 
 //process output fasta file from blastp
+//since I don't have the data yet, I'll create a dummy file
+process align_seqs {
+    publishDir "${params.publish_dir}/clustal", mode: 'copy'
+    input:
+        path fasta
+    output:
+        path "${fasta.baseName}.aln"
+    script:
+        """
+        clustalo -i ${fasta} -o "${fasta.baseName}.aln"
+        """
+}
+
 
 process build_profile {
     publishDir "${params.publish_dir}/hmmer", mode: 'copy'
@@ -71,21 +102,8 @@ process build_profile {
         """
 }
 
-process calibrate_hmm {
-    publishDir "${params.publish_dir}/hmmer", mode: 'copy'
-    input:
-        path hmm
-    output:
-        """
-        path "${hmm}.cal"
-        """
-    script:
-        """
-        hmmcalibrate ${hmm} > "${hmm}.cal"
-        """
-}
 
-process hmm_search {
-
-}
+//process hmm_search {
+//
+//}
 
