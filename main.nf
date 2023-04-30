@@ -5,6 +5,8 @@ workflow {
     protein_fasta = Channel
                     .fromPath('./data/xyl.faa')
                     .splitFasta(by: 1, file: true )
+    yeast_genomes = Channel
+                    .fromPath('./data/**.fsa')
 
     //download_db()
     yeast_tax_id()
@@ -12,6 +14,10 @@ workflow {
     to_fasta(blastp.out)
     align_seqs(to_fasta.out)
     build_profile(align_seqs.out)
+    get_orfs(yeast_genomes)
+    hmm_search(build_profile.out.collect(), get_orfs.out)
+    parse_hmm_hits(hmm_search.out)
+    cat_hits(parse_hmm_hits.out[0].collect())
 
 }
 
@@ -59,9 +65,6 @@ process blastp {
         -remote
         """    
 }
-//qseqid = query sequence id
-//sseqid = subject sequence id
-//sseq = subject sequence (is this only the aligned part?)
 
 process to_fasta {
     publishDir "${params.publish_dir}/blastp", mode: 'copy'
@@ -75,8 +78,6 @@ process to_fasta {
         """
 }
 
-//process output fasta file from blastp
-//since I don't have the data yet, I'll create a dummy file
 process align_seqs {
     publishDir "${params.publish_dir}/clustal", mode: 'copy'
     input:
@@ -85,10 +86,9 @@ process align_seqs {
         path "${fasta.baseName}.aln"
     script:
         """
-        clustalo -i ${fasta} -o "${fasta.baseName}.aln"
+        clustalo -i ${fasta} -o ${fasta.baseName}.aln
         """
 }
-
 
 process build_profile {
     publishDir "${params.publish_dir}/hmmer", mode: 'copy'
@@ -98,12 +98,71 @@ process build_profile {
         path "${alignment.baseName}.hmm"
     script:
         """
-        hmmbuild "${alignment.baseName}.hmm" ${alignment}
+        hmmbuild ${alignment.baseName}.hmm ${alignment}
         """
 }
 
+process get_orfs {
+    publishDir "${params.publish_dir}/orfs", mode: 'copy'
+    input:
+        path yeast_genomes
+    output:
+        path "${yeast_genomes.baseName}.orfs.fa"
+    script:
+        """
+        ORFfinder -s 1 -in ${yeast_genomes} -out ${yeast_genomes.baseName}.orfs.fa
+        """
+}
 
-//process hmm_search {
-//
-//}
+process hmm_search {
+    publishDir "${params.publish_dir}/hmmer/search", mode: 'copy'
+    input:
+        path hmm
+        path orfs
+    output:
+        path "${orfs.baseName}.hmmsearch"
+    script:
+        """
+        hmmsearch --tblout ${orfs.baseName}.hmmsearch ${hmm} ${orfs} 
+        """
+}
+
+process parse_hmm_hits {
+    publishDir "${params.publish_dir}/hmmer/parsed/tsv", mode: 'copy', pattern: "*.tsv"
+    publishDir "${params.publish_dir}/hmmer/parsed/bed", mode: 'copy', pattern: "*.bed"
+    input:
+        path hmmsearch
+    output:
+        path "${hmmsearch}.tsv"
+        path "${hmmsearch}.bed"
+    script:
+        """
+        python ${params.scripts}/parse_hmm_hits.py ${hmmsearch}
+        """
+}
+
+process cat_hits {
+    publishDir "${params.publish_dir}/hmmer/parsed", mode: 'copy'
+    input:
+        path hits_table
+    output:
+        path "all_hits.tsv"
+    script:
+        """
+        cat ${hits_table} > all_hits.tsv
+        """
+}
+
+process plot_evals {
+    publishDir "${params.publish_dir}/images", mode: 'copy'
+    input:
+        path hits_table
+    output:
+        path "evals.png"
+    script:
+        """
+        python ${params.scripts}/plot_evals.py ${hits_table}
+        """
+
+}
 
