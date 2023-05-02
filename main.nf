@@ -6,7 +6,7 @@ workflow {
                     .fromPath('./data/xyl.faa')
                     .splitFasta(by: 1, file: true )
     yeast_genomes = Channel
-                    .fromPath('./data/**.fsa')
+                    .fromPath('./data/yeast_genomes/*.fna')
 
     //download_db()
     yeast_tax_id()
@@ -17,7 +17,12 @@ workflow {
     get_orfs(yeast_genomes)
     hmm_search(build_profile.out.collect(), get_orfs.out)
     parse_hmm_hits(hmm_search.out)
+    hits_per_genomes(parse_hmm_hits.out[0].collect())
+    genome_sizes(yeast_genomes.collect())
+    plot_size_v_hits(genome_sizes.out, hits_per_genomes.out)
     cat_hits(parse_hmm_hits.out[0].collect())
+    plot_evals(cat_hits.out)
+    filter_evals(cat_hits.out)
 
 }
 
@@ -133,12 +138,53 @@ process parse_hmm_hits {
     input:
         path hmmsearch
     output:
-        path "${hmmsearch}.tsv"
-        path "${hmmsearch}.bed"
+        path "${hmmsearch}.tsv", optional: true
+        path "${hmmsearch}.bed", optional: true
     script:
         """
         python ${params.scripts}/parse_hmm_hits.py ${hmmsearch}
         """
+}
+
+process hits_per_genomes {
+    publishDir "${params.publish_dir}/hmmer", mode: 'copy'
+    input:
+        path all_hits_tables
+    output:
+        path "hits_per_genome"
+    script:
+        """
+        wc -l * > tmp
+        head -n -1 tmp | awk '{print \$1, \$2}' > hits_per_genome
+        """
+}
+
+process genome_sizes {
+    publishDir "${params.publish_dir}/hmmer", mode: 'copy'
+    input:
+        path genomes
+    output:
+        path "genome_sizes"
+    script:
+        """
+        genomes=(`echo ${genomes} | tr -d "[],"`)
+        for genome in \${genomes[@]}; do
+            python ${params.scripts}/fasta_size.py \$genome >> genome_sizes
+        done
+        """
+}
+
+process plot_size_v_hits {
+   publishDir "${params.publish_dir}/images", mode: 'copy'
+    input:
+        path genomes_sizes
+        path hmmer_hits
+    output:
+        path "size_v_hits.png"
+    script:
+        """
+        python ${params.scripts}/plot_size_v_hits.py ${genomes_sizes} ${hmmer_hits}
+        """ 
 }
 
 process cat_hits {
@@ -154,15 +200,44 @@ process cat_hits {
 }
 
 process plot_evals {
+    cache false
     publishDir "${params.publish_dir}/images", mode: 'copy'
     input:
         path hits_table
     output:
-        path "evals.png"
+        path "e-vals.png"
     script:
         """
-        python ${params.scripts}/plot_evals.py ${hits_table}
+        python ${params.scripts}/plot_hmmer_evalues.py ${hits_table}
         """
-
 }
+
+process filter_evals {
+    publishDir "${params.publish_dir}/hmmer", mode: 'copy'
+    input:
+        path hits_table
+    output:
+        path "${hits_table}.filtered"
+    script:
+        """
+        awk '\$3 <= 0.1' ${hits_table} > ${hits_table}.filtered
+        """
+}
+
+process extract_fasta {
+    publishDir "${params.publish_dir}", mode: 'copy'
+    input:
+
+    output:
+
+    script:
+        """
+        """
+}
+
+
+//align the fasta files
+//create a distance matrix
+//orthogroup analysis
+    //mcl clustering
 
