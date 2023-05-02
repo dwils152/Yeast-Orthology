@@ -1,6 +1,6 @@
 # Yeast Gene Annotation Pipeline
 
-🚧 Under Construction🚧
+🚧 Under Construction 🚧
 
 A gene annotation pipeline for yeast using Nextflow and Python.
 
