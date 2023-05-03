@@ -21,9 +21,27 @@ workflow {
     genome_sizes(yeast_genomes.collect())
     plot_size_v_hits(genome_sizes.out, hits_per_genomes.out)
     cat_hits(parse_hmm_hits.out[0].collect())
-    plot_evals(cat_hits.out)
+    //plot_evals(cat_hits.out)
     filter_evals(cat_hits.out)
 
+        yeast_genomes
+            .map { [it.name.toString().split("_")[0,1].join(""), it] }
+            .set{ genome_map }
+            
+        parse_hmm_hits.out[0]
+            .map { [it.name.toString().split("_")[0,1].join(""), it] }
+            .set{ hits_map }
+        
+        genome_map
+            .combine(hits_map, by: 0)
+            .map{ id, genome, hits -> [id, genome, hits] }
+            .set{ genome_hits }
+
+    extract_fasta(genome_hits)
+    cat_fasta(extract_fasta.out.collect())
+    compute_kmer_freq(cat_fasta.out)
+    align_hmmer_hits(cat_fasta.out)
+        
 }
 
 // create a process to download the database... the update_blastdb.pl script comes with the blast+ package but doesn't work
@@ -224,14 +242,54 @@ process filter_evals {
         """
 }
 
+//add a threshold parameter to the extract_fasta process
 process extract_fasta {
-    publishDir "${params.publish_dir}", mode: 'copy'
+    label "Andromeda"
+    publishDir "${params.publish_dir}/fasta_hits/single", mode: 'copy'
     input:
-
+        tuple val(id), path(genome), path(hits)
     output:
-
+        path "${id}.faa"
     script:
         """
+        python ${params.scripts}/extract_fasta.py ${genome} ${hits} ${id}.faa
+        """
+}
+
+process cat_fasta {
+    publishDir "${params.publish_dir}/fasta_hits", mode: 'copy'
+    input:
+        path fasta
+    output:
+        path "all_hits.faa"
+    script:
+        """
+        cat ${fasta} > all_hits.faa
+        """
+}
+
+process compute_kmer_freq {
+    cache false
+    publishDir "${params.publish_dir}/kmer_freq", mode: 'copy'
+    input:
+        path fasta
+    output:
+        path "${fasta.baseName}.kmer_freq.npy"
+    script:
+        """
+        python ${params.scripts}/kmer_frequencies.py ${fasta} ${fasta.baseName}.kmer_freq.npy
+        """
+}
+
+process align_hmmer_hits {
+    publishDir "${params.publish_dir}/clustal", mode: 'copy'
+    input:
+        path fasta
+    output:
+        path "${fasta.baseName}.aln"
+    script:
+        """
+        clustalo -i ${fasta} -o ${fasta.baseName}.aln
         """
 }
 
