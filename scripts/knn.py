@@ -11,28 +11,22 @@ import seaborn as sns
 def main():
 
     kmer_freqs = np.load(sys.argv[1])
-    #print(kmer_freqs.shape)
-    #plot a picture of the np array
-    #plt.imshow(kmer_freqs, cmap='hot', interpolation='nearest')
-    #save the picture
-    #plt.savefig('kmer_freqs.png', dpi=600)
 
     scaler = StandardScaler()
     X = scaler.fit_transform(kmer_freqs)
     tsne = TSNE(n_components=2)
     tsne_components = tsne.fit_transform(X)
     df = pd.DataFrame({'x': tsne_components[:,0], 'y': tsne_components[:,1]})
-    sns.scatterplot(x='x', y='y', data=df)
+    sns.scatterplot(x='x', y='y', data=df, color='#3C5488FF', size=0.05, linewidth=0, legend=False, alpha=0.25)
+    plt.xlabel('t-SNE 1')
+    plt.ylabel('t-SNE 2')
     plt.savefig('tsne.png', dpi=600)
 
-    
-    #np.save('pca_components.npy', pca_components)   
-
-    #for i in range(2, 11):
-    #    kmeans_model = KMeans(n_clusters=i, random_state=1).fit(kmer_freqs)
-    #    labels = kmeans_model.labels_
-    #    ss = metrics.silhouette_score(kmer_freqs, labels, metric='euclidean')
-    #    print(ss)
+    for k in range(1, 11):
+        kmeans_model = KMeans(n_clusters=k, random_state=1).fit(tsne_components)
+        labels = kmeans_model.labels_
+        ss = metrics.silhouette_score(kmer_freqs, labels, metric='euclidean')
+        print('k =', k, 'Silhouette Score:', ss)
 
 if __name__ == "__main__":
     main()

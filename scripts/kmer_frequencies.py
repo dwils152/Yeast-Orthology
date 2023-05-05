@@ -3,15 +3,16 @@ import numpy as np
 from Bio import SeqIO
 import itertools
 import random
+from collections import OrderedDict
 
 def main():
     
     records = SeqIO.to_dict(SeqIO.parse(sys.argv[1], 'fasta'))
     #sort the records by the keys
-    records = dict(sorted(records.items()))
+    records = OrderedDict(sorted(records.items()))
 
     #create an empty numpy array that how many rows as there are sequences in the fasta file and as many columns as there are kmers
-    kmer_array = np.zeros((len(records), 5**3))
+    kmer_array = np.zeros((len(records), 4**3))
 
     non_standard_base_dict = {
         'R': ['A', 'G'],
@@ -54,10 +55,10 @@ def main():
 
 def get_kmer_dict(k):
     kmer_dict = {}
-    for kmer in itertools.product('ATCGN', repeat=k): #add Ns? # Why does a sequence have S ._.
+    for kmer in itertools.product('ATCG', repeat=k): #add Ns? # Why does a sequence have S ._.
         kmer_dict[''.join(kmer)] = 0
     #sort the dictionary by the keys
-    kmer_dict = dict(sorted(kmer_dict.items()))
+    kmer_dict = OrderedDict(sorted(kmer_dict.items()))
     return kmer_dict
 
 

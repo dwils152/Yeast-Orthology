@@ -7,6 +7,8 @@ workflow {
                     .splitFasta(by: 1, file: true )
     yeast_genomes = Channel
                     .fromPath('./data/yeast_genomes/*.fna')
+    ko_annotations = Channel
+                    .fromPath('./data/ko_annotations.txt')
 
     //download_db()
     yeast_tax_id()
@@ -37,10 +39,12 @@ workflow {
             .map{ id, genome, hits -> [id, genome, hits] }
             .set{ genome_hits }
 
-    extract_fasta(genome_hits)
-    cat_fasta(extract_fasta.out.collect())
-    compute_kmer_freq(cat_fasta.out)
-    align_hmmer_hits(cat_fasta.out)
+    extract_fasta(genome_hits).set { fna }
+    fna_to_faa(extract_fasta.out).set { faa }
+    cat_fasta(fna.collect(), faa.collect())
+    //compute_kmer_freq(cat_fasta.out)
+    get_hits_w_annot(ko_annotations, cat_fasta.out[1])
+    align_hmmer_hits(get_hits_w_annot.out)
         
 }
 
@@ -245,26 +249,41 @@ process filter_evals {
 //add a threshold parameter to the extract_fasta process
 process extract_fasta {
     label "Andromeda"
-    publishDir "${params.publish_dir}/fasta_hits/single", mode: 'copy'
+    publishDir "${params.publish_dir}/fasta_hits/single_fna", mode: 'copy'
     input:
         tuple val(id), path(genome), path(hits)
     output:
-        path "${id}.faa"
+        path "${id}.fna"
     script:
         """
-        python ${params.scripts}/extract_fasta.py ${genome} ${hits} ${id}.faa
+        python ${params.scripts}/extract_fasta.py ${genome} ${hits} ${id}.fna
+        """
+}
+
+process fna_to_faa {
+    publishDir "${params.publish_dir}/fasta_hits/single_faa", mode: 'copy'
+    input:
+        path fna
+    output:
+        path "${fna.baseName}.faa"
+    script:
+        """
+        python ${params.scripts}/fna_to_faa.py ${fna} ${fna.baseName}.faa
         """
 }
 
 process cat_fasta {
     publishDir "${params.publish_dir}/fasta_hits", mode: 'copy'
     input:
-        path fasta
+        path fna
+        path faa
     output:
+        path "all_hits.fna"
         path "all_hits.faa"
     script:
         """
-        cat ${fasta} > all_hits.faa
+        cat ${fna} > all_hits.fna
+        cat ${faa} > all_hits.faa
         """
 }
 
@@ -281,7 +300,22 @@ process compute_kmer_freq {
         """
 }
 
+process get_hits_w_annot {
+    publishDir "${params.publish_dir}", mode: 'copy'
+    input:
+        path ko_annotations
+        path all_hits
+    output:
+        path "all_hits_w_annot.faa"
+    script:
+        """
+        awk 'NF==2' ${ko_annotations} > w_annot
+        python ${params.scripts}/get_hits_w_annot.py ${all_hits} w_annot all_hits_w_annot.faa
+        """
+}
+
 process align_hmmer_hits {
+    label "big_mem"
     publishDir "${params.publish_dir}/clustal", mode: 'copy'
     input:
         path fasta
@@ -294,8 +328,4 @@ process align_hmmer_hits {
 }
 
 
-//align the fasta files
-//create a distance matrix
-//orthogroup analysis
-    //mcl clustering
 
