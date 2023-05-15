@@ -11,19 +11,23 @@ workflow {
                     .fromPath('./data/ko_annotations.txt')
 
     //download_db()
-    yeast_tax_id()
-    blastp(protein_fasta, yeast_tax_id.out)
-    to_fasta(blastp.out)
+    //yeast_tax_id()
+    //blastp(protein_fasta)
+    //get_subtree_id(yeast_tax_id.out)
+    filter_by_taxid(blastp.out, get_subtree_id.out)
+    sample_fasta(get_subtree_id.out, filter_by_taxid.out)
+    to_fasta(sample_fasta.out)
     align_seqs(to_fasta.out)
     build_profile(align_seqs.out)
-    get_orfs(yeast_genomes)
+    query_length(protein_fasta)
+    get_orfs(yeast_genomes, query_length.out.first()) //first converts queue to value
     hmm_search(build_profile.out.collect(), get_orfs.out)
     parse_hmm_hits(hmm_search.out)
     hits_per_genomes(parse_hmm_hits.out[0].collect())
     genome_sizes(yeast_genomes.collect())
     plot_size_v_hits(genome_sizes.out, hits_per_genomes.out)
     cat_hits(parse_hmm_hits.out[0].collect())
-    //plot_evals(cat_hits.out)
+    plot_evals(cat_hits.out)
     filter_evals(cat_hits.out)
 
         yeast_genomes
@@ -42,9 +46,14 @@ workflow {
     extract_fasta(genome_hits).set { fna }
     fna_to_faa(extract_fasta.out).set { faa }
     cat_fasta(fna.collect(), faa.collect())
-    //compute_kmer_freq(cat_fasta.out)
+    compute_kmer_freq(cat_fasta.out[0])
+    cluster_seqs(compute_kmer_freq.out)
     get_hits_w_annot(ko_annotations, cat_fasta.out[1])
-    align_hmmer_hits(get_hits_w_annot.out)
+    plot_seq_length(cat_fasta.out[1], get_hits_w_annot.out)
+    //align_hmmer_hits(get_hits_w_annot.out)
+    //run_orthofinder(get_hits_w_annot.out.splitFasta(by: 1, file: true).collect())
+    //generate_ml_tree(align_hmmer_hits.out)
+    */
         
 }
 
@@ -67,10 +76,12 @@ process download_db {
 process yeast_tax_id {
     publishDir "${params.publish_dir}/blastp", mode: 'copy'
     output:
-        path "yeast_tax_id"
+        env id
     script:
         """
-        get_species_taxids.sh -n Saccharomycetes > yeast_tax_id
+        get_species_taxids.sh -n Saccharomycetales > yeast_tax_id
+        id=(`head -n2 yeast_tax_id | tail -n1`)
+        id=\${id[2]}
         """
 }
 
@@ -78,7 +89,6 @@ process blastp {
     publishDir "${params.publish_dir}/blastp", mode: 'copy'
     input:
         path protein_fasta
-        path yeast_tax_id
     output:
         path "${protein_fasta.baseName}.blastp"
     script:
@@ -87,10 +97,48 @@ process blastp {
         -query ${protein_fasta} \
         -db nr \
         -out "${protein_fasta.baseName}.blastp" \
-        -evalue 10 \
-        -outfmt '6 qseqid sseqid sseq' \
+        -outfmt "6 qseqid sseqid sseq staxid evalue" \
         -remote
         """    
+}
+
+process get_subtree_id {
+    publishDir "${params.publish_dir}/blastp", mode: 'copy'
+    input:
+        val yeast_tax_id
+    output:
+        path "yeast_subtree_id"
+    script:
+        """
+        taxonkit list -i ${yeast_tax_id} | taxonkit reformat -I 1 > yeast_subtree_id
+        """
+}
+
+process filter_by_taxid {
+    publishDir "${params.publish_dir}/blastp", mode: 'copy'
+    input:
+        path blastp_out
+        val yeast_tax_id
+    output:
+        path "${blastp_out}.filtered"
+    script:
+        """
+        python ${params.scripts}/filter_blast_by_tax.py ${blastp_out} ${yeast_tax_id} "${blastp_out}.filtered"
+        """
+}
+
+// choose a maximum of 5 sequences per family to build profile
+process sample_fasta {
+    publishDir "${params.publish_dir}/blastp", mode: 'copy'
+    input:
+        path yeast_tax
+        path fasta
+    output:
+        path "${fasta}.sampled"
+    script:
+        """
+        python ${params.scripts}/sample_blast_hits.py ${fasta} ${yeast_tax} "${fasta}.sampled"
+        """
 }
 
 process to_fasta {
@@ -129,6 +177,17 @@ process build_profile {
         """
 }
 
+process query_length {
+    input:
+        path protein_fasta
+    output:
+        env length
+    script:
+        """
+        length=`grep -v ">" ${protein_fasta} | tr -d '\\n' | wc -c`
+        """
+}
+
 process get_orfs {
     publishDir "${params.publish_dir}/orfs", mode: 'copy'
     input:
@@ -137,7 +196,7 @@ process get_orfs {
         path "${yeast_genomes.baseName}.orfs.fa"
     script:
         """
-        ORFfinder -s 1 -in ${yeast_genomes} -out ${yeast_genomes.baseName}.orfs.fa
+        ORFfinder -ml \$threshold -in ${yeast_genomes} -out ${yeast_genomes.baseName}.orfs.fa
         """
 }
 
@@ -221,8 +280,19 @@ process cat_hits {
         """
 }
 
+process filter_hits_by_len {
+    publishDir "${params.publish_dir}/hmmer/parsed", mode: 'copy'
+    input:
+        path hits_table
+    output:
+        path "${hits_table}.filtered"
+    script:
+        """
+        
+        """
+}
+
 process plot_evals {
-    cache false
     publishDir "${params.publish_dir}/images", mode: 'copy'
     input:
         path hits_table
@@ -300,6 +370,33 @@ process compute_kmer_freq {
         """
 }
 
+process cluster_seqs {
+    label "big_mem"
+    publishDir "${params.publish_dir}/clustering", mode: 'copy'
+    input:
+        path fasta
+    output:
+        path "${fasta.baseName}.tsne.png"
+        path "${fasta.baseName}.knn.png"
+    script:
+        """
+        python ${params.scripts}/knn.py ${fasta}
+        """
+}
+
+process plot_seq_length {
+    publishDir "${params.publish_dir}/images", mode: 'copy'
+    input:
+        path all_hits
+        path hits_w_annot
+    output:
+        path "seq_lengths.png"
+    script:
+        """
+        python ${params.scripts}/plot_seq_lengths.py ${all_hits} ${hits_w_annot} seq_lengths.png
+        """
+}
+
 process get_hits_w_annot {
     publishDir "${params.publish_dir}", mode: 'copy'
     input:
@@ -324,6 +421,32 @@ process align_hmmer_hits {
     script:
         """
         clustalo -i ${fasta} -o ${fasta.baseName}.aln
+        """
+}
+
+process run_orthofinder {
+    publishDir "${params.publish_dir}/orthofinder", mode: 'copy'
+    input:
+        path fasta
+    output:
+        "*"
+    script:
+        """
+        mkdir -p run_dir
+        mv ${fasta} run_dir
+        python ~/OrthoFinder_source/orthofinder.py -f run_dir
+        """
+}
+
+process generate_ml_tree {
+    publishDir "${params.publish_dir}/trees", mode: 'copy'
+    input:
+        path alignment
+    output:
+        path "${alignment}.tree"
+    script:
+        """
+        FastTreeDbl ${alignment} > ${alignment}.tree
         """
 }
 

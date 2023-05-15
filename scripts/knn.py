@@ -7,6 +7,7 @@ from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
+from gap_statistic import OptimalK
 
 def main():
 
@@ -21,12 +22,17 @@ def main():
     plt.xlabel('t-SNE 1')
     plt.ylabel('t-SNE 2')
     plt.savefig('tsne.png', dpi=600)
+    
+    optimalK = OptimalK(n_jobs=1)
+    n_clusters = optimalK(tsne_components, cluster_array=np.arange(1, 15))
 
-    for k in range(1, 11):
-        kmeans_model = KMeans(n_clusters=k, random_state=1).fit(tsne_components)
-        labels = kmeans_model.labels_
-        ss = metrics.silhouette_score(kmer_freqs, labels, metric='euclidean')
-        print('k =', k, 'Silhouette Score:', ss)
+    optimalK.gap_df.to_csv('gap.csv', index=False)
+
+    #for k in range(1, 11):
+    #    kmeans_model = KMeans(n_clusters=k, random_state=1).fit(tsne_components)
+    #    labels = kmeans_model.labels_
+    #    ss = metrics.silhouette_score(kmer_freqs, labels, metric='euclidean')
+    #    print('k =', k, 'Silhouette Score:', ss)
 
 if __name__ == "__main__":
     main()

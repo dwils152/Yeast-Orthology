@@ -1,3 +1,8 @@
 ncbi-blast-2.14.0
 hmmer-3.3.1
-ORFinder-0.4.3:https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/ORFfinder/
+ORFinder-0.4.3: https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/ORFfinder/
+clustal-omega-1.2.4
+FastTreeDbl
+
+python packages:
+

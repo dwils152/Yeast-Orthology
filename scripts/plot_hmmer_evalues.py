@@ -12,7 +12,7 @@ def main():
     # Plot the data
     fig, ax = plt.subplots(figsize=(7, 7))
     sns.kdeplot(data=hits_df, x='E-value', color='#3C5488FF')
-    plt.axvline(x=0.1, color='r', linestyle='--', linewidth=0.5)
+    #plt.axvline(x=0.1, color='r', linestyle='--', linewidth=0.5)
     
     # Add axis labels and a title
     ax.set_xlabel('E-value')
