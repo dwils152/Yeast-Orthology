@@ -3,31 +3,48 @@ nextflow.enable.dsl=2
 
 workflow {
     protein_fasta = Channel
-                    .fromPath('./data/xyl.faa')
+                    .fromPath('./data/fasta.faa')
                     .splitFasta(by: 1, file: true )
+
+    //protein_fasta.count().view()
     yeast_genomes = Channel
-                    .fromPath('./data/yeast_genomes/*.fna')
+                    .fromPath('./data/yeast_genomes/*.fna').take(200)
     ko_annotations = Channel
                     .fromPath('./data/ko_annotations.txt')
+    y1000_pep_annotations = Channel
+                    .fromPath('./data/y_1000p/y1000p_pep_files/*.pep') 
+    blastp_out = Channel
+                 .fromPath('./data/blastp/xyl.faa.blastp')
 
-    //download_db()
-    //yeast_tax_id()
-    //blastp(protein_fasta)
-    //get_subtree_id(yeast_tax_id.out)
+    yeast_tax_id()
+    blastp(protein_fasta)
+    get_subtree_id(yeast_tax_id.out)
     filter_by_taxid(blastp.out, get_subtree_id.out)
     sample_fasta(get_subtree_id.out, filter_by_taxid.out)
     to_fasta(sample_fasta.out)
     align_seqs(to_fasta.out)
     build_profile(align_seqs.out)
     query_length(protein_fasta)
-    get_orfs(yeast_genomes, query_length.out.first()) //first converts queue to value
+    get_orfs(yeast_genomes)
+    //cat_y1000p_pep(y1000_pep_annotations.collect())
     hmm_search(build_profile.out.collect(), get_orfs.out)
     parse_hmm_hits(hmm_search.out)
-    hits_per_genomes(parse_hmm_hits.out[0].collect())
+    hits_per_genomes(parse_hmm_hits.out[0].collect(), protein_fasta.count())
     genome_sizes(yeast_genomes.collect())
-    plot_size_v_hits(genome_sizes.out, hits_per_genomes.out)
-    cat_hits(parse_hmm_hits.out[0].collect())
-    plot_evals(cat_hits.out)
+    plot_size_v_hits(genome_sizes.out, hits_per_genomes.out[1].flatten())
+
+        parse_hmm_hits.out[0]
+            .flatten()
+            .map { it -> tuple(it.name.toString().split("fasta.")[1], it) }
+            .groupTuple()
+            .map { it[1].collect() }
+            .toList()
+            .set{ hits_per_fasta }
+
+        //hits_per_fasta.view()
+
+    cat_hits(hits_per_fasta) //very hacky
+    /*plot_evals(cat_hits.out)
     filter_evals(cat_hits.out)
 
         yeast_genomes
@@ -46,30 +63,16 @@ workflow {
     extract_fasta(genome_hits).set { fna }
     fna_to_faa(extract_fasta.out).set { faa }
     cat_fasta(fna.collect(), faa.collect())
+    //filter_fasta_by_len(cat_fasta.out[0])
     compute_kmer_freq(cat_fasta.out[0])
     cluster_seqs(compute_kmer_freq.out)
     get_hits_w_annot(ko_annotations, cat_fasta.out[1])
     plot_seq_length(cat_fasta.out[1], get_hits_w_annot.out)
-    //align_hmmer_hits(get_hits_w_annot.out)
+    align_hmmer_hits(get_hits_w_annot.out)
     //run_orthofinder(get_hits_w_annot.out.splitFasta(by: 1, file: true).collect())
-    //generate_ml_tree(align_hmmer_hits.out)
-    */
+    //generate_ml_tree(align_hmmer_hits.out)*/
+    
         
-}
-
-// create a process to download the database... the update_blastdb.pl script comes with the blast+ package but doesn't work
-process download_db {
-    label "DTN"
-    publishDir "${params.publish_dir}/blastp", mode: 'copy'
-    output:
-        path "*"
-    script:
-        """
-        for i in {00..93}; do
-            wget ftp://ftp.ncbi.nlm.nih.gov/blast/db/nr.\${i}.tar.gz
-            tar -xvzf nr.\${i}.tar.gz
-        done
-        """
 }
 
 // get_species_taxids.sh is a binary that comes with the blast+ package
@@ -97,7 +100,7 @@ process blastp {
         -query ${protein_fasta} \
         -db nr \
         -out "${protein_fasta.baseName}.blastp" \
-        -outfmt "6 qseqid sseqid sseq staxid evalue" \
+        -outfmt "6 qseqid sseqid sseq staxid" \
         -remote
         """    
 }
@@ -118,12 +121,12 @@ process filter_by_taxid {
     publishDir "${params.publish_dir}/blastp", mode: 'copy'
     input:
         path blastp_out
-        val yeast_tax_id
+        path yeast_subtree_ids
     output:
         path "${blastp_out}.filtered"
     script:
         """
-        python ${params.scripts}/filter_blast_by_tax.py ${blastp_out} ${yeast_tax_id} "${blastp_out}.filtered"
+        python ${params.scripts}/filter_blast_by_tax.py ${blastp_out} ${yeast_subtree_ids} "${blastp_out}.filtered"
         """
 }
 
@@ -137,7 +140,7 @@ process sample_fasta {
         path "${fasta}.sampled"
     script:
         """
-        python ${params.scripts}/sample_blast_hits.py ${fasta} ${yeast_tax} "${fasta}.sampled"
+        python ${params.scripts}/sample_blast_hits.py ${yeast_tax}  ${fasta} "${fasta}.sampled"
         """
 }
 
@@ -196,20 +199,43 @@ process get_orfs {
         path "${yeast_genomes.baseName}.orfs.fa"
     script:
         """
-        ORFfinder -ml \$threshold -in ${yeast_genomes} -out ${yeast_genomes.baseName}.orfs.fa
+        ORFfinder -in ${yeast_genomes} -out ${yeast_genomes.baseName}.orfs.fa
+        """
+}
+
+process pep_per_y1000p {
+    publishDir "${params.publish_dir}/orfs", mode: 'copy'
+    input:
+        path y1000_pep_annotations
+    output:
+        path "${y1000_pep_annotations.baseName}.orfs.fa"
+    script:
+        """
+        """
+}
+
+process cat_y1000p_pep {
+    publishDir "${params.publish_dir}/orfs", mode: 'copy'
+    input:
+        path y1000_pep_annotations
+    output:
+        path "y1000_all_pep.orfs.fa"
+    script:
+        """
+        cat ${y1000_pep_annotations} > y1000_all_pep.orfs.fa
         """
 }
 
 process hmm_search {
     publishDir "${params.publish_dir}/hmmer/search", mode: 'copy'
     input:
-        path hmm
+        each hmm
         path orfs
     output:
-        path "${orfs.baseName}.hmmsearch"
+        path "${orfs.baseName}_${hmm.baseName}.hmmsearch"
     script:
         """
-        hmmsearch --tblout ${orfs.baseName}.hmmsearch ${hmm} ${orfs} 
+        hmmsearch --tblout ${orfs.baseName}_${hmm.baseName}.hmmsearch ${hmm} ${orfs} 
         """
 }
 
@@ -231,12 +257,17 @@ process hits_per_genomes {
     publishDir "${params.publish_dir}/hmmer", mode: 'copy'
     input:
         path all_hits_tables
+        val num_genes
     output:
-        path "hits_per_genome"
+        path "all_gene_hits_per_genome"
+        path "fasta.*_hits_per_genome"
     script:
         """
         wc -l * > tmp
-        head -n -1 tmp | awk '{print \$1, \$2}' > hits_per_genome
+        head -n -1 tmp | awk '{print \$1, \$2}' > all_gene_hits_per_genome
+        for i in {1..${num_genes}}; do
+            grep "fasta.\${i}." all_gene_hits_per_genome > fasta.\${i}_hits_per_genome
+        done
         """
 }
 
@@ -256,12 +287,12 @@ process genome_sizes {
 }
 
 process plot_size_v_hits {
-   publishDir "${params.publish_dir}/images", mode: 'copy'
+   publishDir "${params.publish_dir}/images/size_v_hits", mode: 'copy'
     input:
         path genomes_sizes
         path hmmer_hits
     output:
-        path "size_v_hits.png"
+        path "fasta.*.size_v_hits.png"
     script:
         """
         python ${params.scripts}/plot_size_v_hits.py ${genomes_sizes} ${hmmer_hits}
@@ -271,12 +302,17 @@ process plot_size_v_hits {
 process cat_hits {
     publishDir "${params.publish_dir}/hmmer/parsed", mode: 'copy'
     input:
-        path hits_table
+        each list
     output:
-        path "all_hits.tsv"
+        path "fasta.*.tsv"
     script:
         """
-        cat ${hits_table} > all_hits.tsv
+        files=(`echo ${list} | tr -d "[],"`)
+        file=\${files[0]}
+        ext_num=`basename \$file | sed 's/.*fasta\\.\([0-9]*\\).*/\\1/'`
+        for hit in \${hits[@]}; do
+            cat \${hit} >> fasta.\${ext_num}.tsv
+        done
         """
 }
 
@@ -293,6 +329,7 @@ process filter_hits_by_len {
 }
 
 process plot_evals {
+    cache false
     publishDir "${params.publish_dir}/images", mode: 'copy'
     input:
         path hits_table
@@ -323,10 +360,10 @@ process extract_fasta {
     input:
         tuple val(id), path(genome), path(hits)
     output:
-        path "${id}.fna"
+        path "${id}_${genome}_${hits}.fna"
     script:
         """
-        python ${params.scripts}/extract_fasta.py ${genome} ${hits} ${id}.fna
+        python ${params.scripts}/extract_fasta.py ${genome} ${hits} ${id}_${genome}_${hits}.fna
         """
 }
 
@@ -358,7 +395,6 @@ process cat_fasta {
 }
 
 process compute_kmer_freq {
-    cache false
     publishDir "${params.publish_dir}/kmer_freq", mode: 'copy'
     input:
         path fasta
@@ -374,13 +410,13 @@ process cluster_seqs {
     label "big_mem"
     publishDir "${params.publish_dir}/clustering", mode: 'copy'
     input:
-        path fasta
+        path kmer_freq
     output:
-        path "${fasta.baseName}.tsne.png"
-        path "${fasta.baseName}.knn.png"
+        path "*.png"
+        path "gap.csv"
     script:
         """
-        python ${params.scripts}/knn.py ${fasta}
+        python ${params.scripts}/knn.py ${kmer_freq}
         """
 }
 
@@ -449,6 +485,3 @@ process generate_ml_tree {
         FastTreeDbl ${alignment} > ${alignment}.tree
         """
 }
-
-
-
